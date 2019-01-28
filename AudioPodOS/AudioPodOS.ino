@@ -1,28 +1,31 @@
 /***************************************************
-DFPlayer - A Mini MP3 Player For Arduino
- <https://www.dfrobot.com/index.php?route=product/product&product_id=1121>
- 
+  DFPlayer - A Mini MP3 Player For Arduino
+  <https://www.dfrobot.com/index.php?route=product/product&product_id=1121>
+
  ***************************************************
- This example shows the basic function of library for DFPlayer.
- 
- Created 2016-12-07
- By [Angelo qiao](Angelo.qiao@dfrobot.com)
- 
- GNU Lesser General Public License.
- See <http://www.gnu.org/licenses/> for details.
- All above must be included in any redistribution
+  This example shows the basic function of library for DFPlayer.
+
+  Created 2016-12-07
+  By [Angelo qiao](Angelo.qiao@dfrobot.com)
+
+  GNU Lesser General Public License.
+  See <http://www.gnu.org/licenses/> for details.
+  All above must be included in any redistribution
  ****************************************************/
 
 /***********Notice and Trouble shooting***************
- 1.Connection and Diagram can be found here
- <https://www.dfrobot.com/wiki/index.php/DFPlayer_Mini_SKU:DFR0299#Connection_Diagram>
- 2.This code is tested on Arduino Uno, Leonardo, Mega boards.
+  1.Connection and Diagram can be found here
+  <https://www.dfrobot.com/wiki/index.php/DFPlayer_Mini_SKU:DFR0299#Connection_Diagram>
+  2.This code is tested on Arduino Uno, Leonardo, Mega boards.
  ****************************************************/
 
 #include "Arduino.h"
 //#include "SoftwareSerial.h"
+
+#include <SerialFlash.h>
 #include <RTCZero.h>
 #include "DFRobotDFPlayerMini.h"
+
 /* Create an rtc object */
 RTCZero rtc;
 
@@ -36,39 +39,77 @@ const byte day = 11;
 const byte month = 02;
 const byte year = 18;
 
-long randNumber;
-//SoftwareSerial mySoftwareSerial(10, 11); // RX, TX
+/* DFPlayer Mini setup */
 DFRobotDFPlayerMini myDFPlayer;
 void printDetail(uint8_t type, int value);
-
-bool matched = false;
+bool playSound = true;
 
 unsigned char pinNumber;
 
-const int sensorPin = 1;
-int lightLevel, high = 0, low = 1023;
+#define LIGHTSENSORPIN A1
+int lightLevel;
+const int lightLevelThreshold = 255;
+const int awakeInterval = 7; //measured in minutes
+const int sleepInterval = 30; //measured in minutes
+int alarmInterval = awakeInterval;
+const int maxRunTime = 8; // measured in hours
+
+bool debugging = false;
+bool tempDebugging = false;
+/* thermistor setup */
+// which analog pin to connect
+#define THERMISTORPIN A2
+// resistance at 25 degrees C
+#define THERMISTORNOMINAL 10000
+// temp. for nominal resistance (almost always 25 C)
+#define TEMPERATURENOMINAL 25
+// how many samples to take and average, more takes longer
+// but is more 'smooth'
+#define NUMSAMPLES 50
+// The beta coefficient of the thermistor (usually 3000-4000)
+#define BCOEFFICIENT 3892
+// the value of the 'other' resistor
+#define SERIESRESISTOR 10000
+
+uint16_t samples[NUMSAMPLES];
+
+/* Heater setup */
+int heaterPin = 5;
+float heaterStartTemp = -21;
+bool heaterOn = false;
+int heaterValue = 0;
 
 void setup()
 {
+  //Serial communication is always required for communicating with the DFPlayer mini
   Serial.begin(9600);
-  //SerialUSB.begin(115200);
-//while(!SerialUSB);
-//  
-//  SerialUSB.println();
-//  SerialUSB.println(F("DFRobot DFPlayer Mini Demo"));
-//  SerialUSB.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
-  if (!myDFPlayer.begin(Serial)) {  //Use softwareSerial to communicate with mp3.
-//    SerialUSB.println(F("Unable to begin:"));
-//    SerialUSB.println(F("1.Please recheck the connection!"));
-//    SerialUSB.println(F("2.Please insert the SD card!"));
-    while(true);
-  }
-  //SerialUSB.println(F("DFPlayer Mini online."));
-//randNumber = random(1, 4);
-//SerialUSB.println(randNumber);
+  /* Thermistor specific setup */
+  analogReference(AR_DEFAULT);
 
-  //lightLevel = analogRead(sensorPin);
-  //SerialUSB.println(lightLevel);
+  if (debugging) {
+    //SerialUSB is for debugging using the rocketscream boards
+    SerialUSB.begin(115200);
+    while (!SerialUSB);
+
+    SerialUSB.println();
+    SerialUSB.println(F("DFRobot DFPlayer Mini Demo"));
+    SerialUSB.println(F("Initializing DFPlayer ... (May take 3~5 seconds)"));
+  }
+  //Connect to the DFplayer mini
+  if (!myDFPlayer.begin(Serial)) {  //Use softwareSerial to communicate with mp3.
+    if (debugging) {
+      SerialUSB.println(F("Unable to begin:"));
+      SerialUSB.println(F("1.Please recheck the connection!"));
+      SerialUSB.println(F("2.Please insert the SD card!"));
+    }
+    while (true);
+  }
+  if (debugging) {
+    SerialUSB.println(F("DFPlayer Mini online."));
+    lightLevel = analogRead(LIGHTSENSORPIN);
+    SerialUSB.println(lightLevel);
+  }
+
   rtc.begin();
 
   rtc.setTime(hours, minutes, seconds);
@@ -77,79 +118,154 @@ void setup()
   rtc.setAlarmTime(18, 50, 10);
   rtc.enableAlarm(rtc.MATCH_MMSS);
 
-  rtc.attachInterrupt(alarmMatch);
+  rtc.attachInterrupt(wakeupAlarm);
 
-  
-  
-  myDFPlayer.volume(10);  //Set volume value. From 0 to 30
-  //myDFPlayer.play(1);
 
+
+  myDFPlayer.volume(15);  //Set volume value. From 0 to 30
+  myDFPlayer.play(1);
+
+  //Low power settings
   for (pinNumber = 0; pinNumber < 23; pinNumber++)
-   {
-   pinMode(pinNumber, INPUT_PULLUP);
-   }
-  
-   for (pinNumber = 32; pinNumber < 42; pinNumber++)
-   {
-   pinMode(pinNumber, INPUT_PULLUP);
-   }
-  
-   pinMode(25, INPUT_PULLUP);
-   pinMode(26, INPUT_PULLUP);
-   pinMode(LED_BUILTIN, OUTPUT);
-   digitalWrite(LED_BUILTIN, LOW);
-   delay(5000);
-   USBDevice.detach();
-   rtc.standbyMode();
+  {
+    pinMode(pinNumber, INPUT_PULLUP);
+  }
+
+  for (pinNumber = 32; pinNumber < 42; pinNumber++)
+  {
+    pinMode(pinNumber, INPUT_PULLUP);
+  }
+
+  pinMode(25, INPUT_PULLUP);
+  pinMode(26, INPUT_PULLUP);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+  analogWrite(heaterPin, 0);
+  delay(15000);
+  if (!debugging) {
+    USBDevice.detach();
+  }
 }
 
 void loop()
 {
-
-  
-  if (myDFPlayer.available()) {
-    printDetail(myDFPlayer.readType(), myDFPlayer.read()); //Print the detail message from DFPlayer to handle different errors and states.
+  if (heaterOn) {
+    analogWrite(heaterPin, heaterValue);
   }
-  //lightLevel = analogRead(sensorPin);
-  //SerialUSB.println(lightLevel);
-  if (matched) {
-    matched = false;
-    lightLevel = analogRead(sensorPin);
-    
-    if(lightLevel >= 250){ 
-      myDFPlayer.volume(30);
-      //SerialUSB.println(F("play sound"));
-      int alarmMinutes = rtc.getMinutes();
-      alarmMinutes += 7;
-      if (alarmMinutes >= 60) {
-        alarmMinutes -= 60;
+
+  if (playSound) {
+    myDFPlayer.volume(30);
+    if (debugging) {
+    myDFPlayer.volume(5);
+    }
+    myDFPlayer.play(1);
+    playSound = false;
+    int alarmMinutes = rtc.getMinutes();
+    alarmMinutes += alarmInterval;
+    if (alarmMinutes >= 60) {
+      alarmMinutes -= 60;
+    }
+    rtc.setAlarmTime(rtc.getHours(), alarmMinutes, rtc.getSeconds());
+    if (!heaterOn) {
+      if (debugging) {
+        SerialUSB.println("standby");
       }
-      //SerialUSB.println(F("play sound"));
-     // randNumber = random(1, 4);
-      myDFPlayer.play(1);
-      rtc.setAlarmTime(rtc.getHours(), alarmMinutes, rtc.getSeconds());
-      rtc.standbyMode();    // Sleep until next alarm match
-    }else{
-      int alarmMinutes = rtc.getMinutes();
-      alarmMinutes += 30;
-      if (alarmMinutes >= 60) {
-        alarmMinutes -= 60;
-      }
-      //SerialUSB.println(F("night time"));
-      rtc.setAlarmTime(rtc.getHours(), alarmMinutes, rtc.getSeconds());
       rtc.standbyMode();    // Sleep until next alarm match
     }
   }
 }
 
 
-void alarmMatch()
+void wakeupAlarm()
 {
-  matched = true;
-  
+
+  if (debugging) {
+    SerialUSB.println("wakeupAlarm");
+  }
+  /* Check ambient */
+
+
+  uint8_t i;
+  float average;
+  pinMode(THERMISTORPIN, INPUT);
+  // take N samples in a row, with a slight delay
+  for (i = 0; i < NUMSAMPLES; i++) {
+    if (tempDebugging) {
+      samples[i] = 975;
+    } else {
+      samples[i] = analogRead(THERMISTORPIN);
+    }
+  }
+  pinMode(THERMISTORPIN, INPUT_PULLUP);
+  // average all the samples out
+  average = 0;
+  for (i = 0; i < NUMSAMPLES; i++) {
+    average += samples[i];
+  }
+  average /= NUMSAMPLES;
+
+  // convert the value to resistance
+  average = 1023 / average - 1;
+  average = SERIESRESISTOR / average;
+
+  float steinhart;
+  steinhart = average / THERMISTORNOMINAL;     // (R/Ro)
+  steinhart = log(steinhart);                  // ln(R/Ro)
+  steinhart /= BCOEFFICIENT;                   // 1/B * ln(R/Ro)
+  steinhart += 1.0 / (TEMPERATURENOMINAL + 273.15); // + (1/To)
+  steinhart = 1.0 / steinhart;                 // Invert
+  steinhart -= 273.15;                         // convert to C
+  if (steinhart < heaterStartTemp) {
+    heaterOn = true;
+    if (steinhart > -30) {
+      heaterValue = 60 + (int)90 * (((steinhart * -1) + heaterStartTemp) / 12);
+    } else {
+      heaterValue = 150;
+    }
+
+    //pinMode(heaterPin, OUTPUT);
+  } else {
+    heaterOn = false;
+    heaterValue = 0;
+    //pinMode(heaterPin, INPUT_PULLUP);
+    analogWrite(heaterPin, 0);
+  };
+
+
+  if (debugging) {
+    SerialUSB.print("Temperature ");
+    SerialUSB.print(steinhart);
+    SerialUSB.println(" *C");
+    SerialUSB.print("Heater Value: ");
+    SerialUSB.println(heaterValue);
+  }
+  //TODO:: Check if first playback and store current time
+
+
+
+  /* Check light levels */
+  lightLevel = analogRead(LIGHTSENSORPIN);
+  if (lightLevel >= lightLevelThreshold) {
+    playSound = true;
+  } else {
+    playSound = false;
+  }
+
+  //TODO::Check total playback time
+  if (playSound || heaterOn) {
+    alarmInterval = awakeInterval;
+  } else {
+    alarmInterval = sleepInterval;
+  }
+  if (tempDebugging) {
+    SerialUSB.print("alarmInterval ");
+    SerialUSB.println(alarmInterval);
+  }
+
+
 }
 
-void printDetail(uint8_t type, int value){
+void printDetail(uint8_t type, int value) {
   switch (type) {
     case TimeOut:
       SerialUSB.println(F("Time Out!"));

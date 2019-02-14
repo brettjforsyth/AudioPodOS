@@ -75,7 +75,7 @@ uint16_t samples[NUMSAMPLES];
 
 /* Heater setup */
 int heaterPin = 5;
-float heaterStartTemp = -21;
+float heaterStartTemp = -24;
 bool heaterOn = false;
 int heaterValue = 0;
 
@@ -217,8 +217,8 @@ void wakeupAlarm()
   steinhart -= 273.15;                         // convert to C
   if (steinhart < heaterStartTemp) {
     heaterOn = true;
-    if (steinhart > -30) {
-      heaterValue = 60 + (int)90 * (((steinhart * -1) + heaterStartTemp) / 12);
+    if (steinhart > -35) {
+      heaterValue = 60 + (int)90 * (((steinhart * -1) + heaterStartTemp) / 11 );
     } else {
       heaterValue = 150;
     }

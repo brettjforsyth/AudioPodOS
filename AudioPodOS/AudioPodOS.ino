@@ -31,12 +31,12 @@ RTCZero rtc;
 
 /* Change these values to set the current initial time */
 const byte seconds = 0;
-const byte minutes = 50;
-const byte hours = 18;
+const byte minutes = 57;
+const byte hours = 0;
 
 /* Change these values to set the current initial date */
-const byte day = 11;
-const byte month = 02;
+const byte day = 01;
+const byte month = 01;
 const byte year = 18;
 
 /* DFPlayer Mini setup */
@@ -49,9 +49,11 @@ unsigned char pinNumber;
 #define LIGHTSENSORPIN A1
 int lightLevel;
 const int lightLevelThreshold = 255;
-const int awakeInterval = 7; //measured in minutes
+const int awakeIntervalMin = 3; //measured in minutes
+const int awakeIntervalSec = 30; //measured in minutes
 const int sleepInterval = 30; //measured in minutes
-int alarmInterval = awakeInterval;
+int alarmIntervalMin = awakeIntervalMin;
+int alarmIntervalSec = awakeIntervalSec;
 const int maxRunTime = 8; // measured in hours
 
 bool debugging = false;
@@ -78,6 +80,10 @@ int heaterPin = 5;
 float heaterStartTemp = -24;
 bool heaterOn = false;
 int heaterValue = 0;
+
+/* Sound file setup */
+int numSoundFiles = 2; 
+int currentFileNumber = 1;
 
 void setup()
 {
@@ -108,22 +114,33 @@ void setup()
     SerialUSB.println(F("DFPlayer Mini online."));
     lightLevel = analogRead(LIGHTSENSORPIN);
     SerialUSB.println(lightLevel);
+   int temp = myDFPlayer.readFileCounts();
+   SerialUSB.print(F("DFPlayer Mini file count: "));
+   SerialUSB.println(temp);
+   numSoundFiles = temp;
   }
 
+  
+
+
+
+  myDFPlayer.volume(15);  //Set volume value. From 0 to 30
+  for (int i = 1; i < numSoundFiles+1; i++)
+  {
+    //delay(2500);
+    myDFPlayer.play(i);
+    delay(10000);
+    
+  }
   rtc.begin();
 
   rtc.setTime(hours, minutes, seconds);
   rtc.setDate(day, month, year);
 
-  rtc.setAlarmTime(18, 50, 10);
+  setSoundAlarm();
   rtc.enableAlarm(rtc.MATCH_MMSS);
 
   rtc.attachInterrupt(wakeupAlarm);
-
-
-
-  myDFPlayer.volume(15);  //Set volume value. From 0 to 30
-  myDFPlayer.play(1);
 
   //Low power settings
   for (pinNumber = 0; pinNumber < 23; pinNumber++)
@@ -158,14 +175,16 @@ void loop()
     if (debugging) {
     myDFPlayer.volume(5);
     }
-    myDFPlayer.play(1);
-    playSound = false;
-    int alarmMinutes = rtc.getMinutes();
-    alarmMinutes += alarmInterval;
-    if (alarmMinutes >= 60) {
-      alarmMinutes -= 60;
+    
+    myDFPlayer.play(currentFileNumber);
+    if(currentFileNumber==numSoundFiles){
+      currentFileNumber = 1;
+    }else{
+      currentFileNumber++;
     }
-    rtc.setAlarmTime(rtc.getHours(), alarmMinutes, rtc.getSeconds());
+    playSound = false;
+    setSoundAlarm();
+
     if (!heaterOn) {
       if (debugging) {
         SerialUSB.println("standby");
@@ -253,16 +272,52 @@ void wakeupAlarm()
 
   //TODO::Check total playback time
   if (playSound || heaterOn) {
-    alarmInterval = awakeInterval;
+    alarmIntervalMin = awakeIntervalMin;
   } else {
-    alarmInterval = sleepInterval;
+    alarmIntervalMin = sleepInterval;
   }
   if (tempDebugging) {
     SerialUSB.print("alarmInterval ");
-    SerialUSB.println(alarmInterval);
+    SerialUSB.println(alarmIntervalMin);
   }
 
 
+}
+
+void setSoundAlarm(){
+  int alarmHours = rtc.getHours();
+
+    
+    int alarmMinutes = rtc.getMinutes();
+    int alarmSeconds = rtc.getSeconds();
+    if (debugging) {
+    SerialUSB.print("alarm mins: ");
+    SerialUSB.println(alarmMinutes);
+    
+    SerialUSB.print("alarm secs: ");
+    SerialUSB.println(alarmSeconds);
+    }
+    alarmSeconds += alarmIntervalSec;
+    if (alarmSeconds >= 60) {
+      alarmSeconds -= 60;
+      alarmMinutes++;
+    }
+    
+    alarmMinutes += alarmIntervalMin;
+    if (alarmMinutes >= 60) {
+      alarmMinutes -= 60;
+    }
+
+     
+   if (debugging) {
+    SerialUSB.print("alarm mins: ");
+    SerialUSB.println(alarmMinutes);
+    
+    SerialUSB.print("alarm secs: ");
+    SerialUSB.println(alarmSeconds);
+    }
+    rtc.setAlarmMinutes(alarmMinutes);
+    rtc.setAlarmSeconds(alarmSeconds); 
 }
 
 void printDetail(uint8_t type, int value) {
